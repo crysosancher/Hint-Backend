@@ -34,6 +34,7 @@ map of *concept → file → why*.
 | Validation         | `class-validator` / `class-transformer`            |
 | Rate limiting      | `@nestjs/throttler` (Phase 6)                      |
 | Logging            | `pino` (Phase 7)                                   |
+| API docs           | `@nestjs/swagger` 11 (OpenAPI 3 + Swagger UI)      |
 | Tests              | Jest + `ts-jest` + `mongodb-memory-server`         |
 
 > **Why these versions?** NestJS 11 core is **CommonJS**. The `@nestjs/*` satellite
@@ -92,6 +93,63 @@ them directly.
 > containers with `docker compose up -d mongo mongo-express` and let the app talk to your
 > local Redis.
 
+### Auth endpoints
+
+| Endpoint                      | Purpose                                              |
+| ----------------------------- | ---------------------------------------------------- |
+| `POST /api/v1/auth/register`  | Create an account (email + password); returns tokens |
+| `POST /api/v1/auth/login`     | Authenticate; returns an access/refresh token pair   |
+| `POST /api/v1/auth/refresh`   | Rotate a refresh token (single-use; replay → 401)    |
+
+Signup is **email + password only** — name, age, gender and photo are collected
+later on the Profile/Preferences screens. Passwords are hashed with Node's native
+`scrypt` (no extra dependency) and refresh tokens are tracked (hashed) in Redis so
+they can be rotated on every use and revoked before expiry.
+
+```bash
+curl -s -X POST http://localhost:3000/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"ada@example.com","password":"Sunshine123","confirmPassword":"Sunshine123"}'
+```
+
+---
+
+## API documentation (Swagger)
+
+Interactive OpenAPI docs are generated from the controllers/DTOs and served
+**outside** the API prefix:
+
+| URL              | Purpose                                    |
+| ---------------- | ------------------------------------------ |
+| `GET /docs`      | Swagger UI                                 |
+| `GET /docs/json` | Raw OpenAPI 3 document (machine-readable)  |
+
+```bash
+# Inspect the generated document
+curl -s http://localhost:3000/docs/json | head
+```
+
+Swagger is enabled by default outside production and disabled when
+`NODE_ENV=production`. Control it with:
+
+| Variable          | Default                              | Meaning                      |
+| ----------------- | ------------------------------------ | ---------------------------- |
+| `SWAGGER_ENABLED` | `true` (unless `NODE_ENV=production`) | `true`/`false`               |
+| `SWAGGER_PATH`    | `docs`                               | Mount path (no API prefix)   |
+
+JWT-protected endpoints use the `access-token` bearer scheme, so you can paste an
+access token into the **Authorize** dialog and call protected routes from the UI.
+
+> **Helmet vs. Swagger UI:** security headers are applied to every route *except*
+> the docs path, which needs inline scripts to render. Helmet's default CSP is
+> skipped for `SWAGGER_PATH` only — the API keeps its strict policy.
+
+To add docs to new endpoints, use `@ApiTags`, `@ApiOperation` and
+`@ApiOkResponse`/`@ApiBadRequestResponse` on the handler, and `@ApiProperty` on DTO
+fields. The Nest CLI Swagger plugin (`nest-cli.json` →
+`plugins: ["@nestjs/swagger"]`) auto-generates `@ApiProperty` metadata from TypeScript
+types, so DTOs need no manual annotation.
+
 ---
 
 ## Scripts
@@ -120,12 +178,12 @@ src/
   app.module.ts           # Root module (HTTP process)
   worker.module.ts        # Root module (worker process)
   core.module.ts          # Shared infra: config + MongoDB + Redis
-  config/                 # Typed configuration + environment validation
+  config/                 # Typed configuration, env validation, Swagger setup
   infra/
     database/             # Mongoose connection
     redis/                # Shared ioredis client + RedisService
   modules/
-    health/               # Liveness / readiness
+    health/               # Liveness / readiness + response DTOs
   common/                 # Guards, interceptors, filters, pipes (grows per phase)
 docs/
   node-concepts/          # Advanced Node.js concept map
@@ -139,7 +197,7 @@ test/                     # e2e tests
 | Phase | Scope                                                                 | Status  |
 | ----- | --------------------------------------------------------------------- | ------- |
 | 0     | Bootstrap: NestJS + config validation + MongoDB/Redis + health checks | ✅ done |
-| 1     | Auth + Users + Profiles + Preferences                                 | ⏳ next |
+| 1     | Auth + Users (signup / login / refresh) + Profiles + Preferences      | 🚧 auth + users done |
 | 2     | Presence (Nearby Mode) + Location ingestion + Redis presence          | ⏳      |
 | 3     | Discovery (2dsphere 250 m) + Interest lifecycle + Matches             | ⏳      |
 | 4     | BullMQ queues: interest/presence expiry, location cleanup             | ⏳      |

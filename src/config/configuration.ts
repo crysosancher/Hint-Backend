@@ -39,6 +39,10 @@ export interface AppConfiguration {
     ttlSeconds: number;
     limit: number;
   };
+  swagger: {
+    enabled: boolean;
+    path: string;
+  };
   queue: {
     prefix: string;
     concurrency: number;
@@ -48,6 +52,11 @@ export interface AppConfiguration {
 const toInt = (value: string | undefined, fallback: number): number => {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+const toBool = (value: string | undefined, fallback: boolean): boolean => {
+  if (value === undefined || value === '') return fallback;
+  return !['false', '0', 'no', 'off'].includes(value.trim().toLowerCase());
 };
 
 export default (): AppConfiguration => ({
@@ -80,6 +89,11 @@ export default (): AppConfiguration => ({
   throttle: {
     ttlSeconds: toInt(process.env.THROTTLE_TTL_SECONDS, 60),
     limit: toInt(process.env.THROTTLE_LIMIT, 100),
+  },
+  swagger: {
+    // Enabled by default outside production; override with SWAGGER_ENABLED=false.
+    enabled: toBool(process.env.SWAGGER_ENABLED, process.env.NODE_ENV !== 'production'),
+    path: process.env.SWAGGER_PATH ?? 'docs',
   },
   queue: {
     prefix: process.env.QUEUE_PREFIX ?? 'hint',

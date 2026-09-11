@@ -98,6 +98,14 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   QUEUE_CONCURRENCY = 5;
+
+  /** 'true'/'false' (leniently parsed in configuration.ts). */
+  @IsOptional()
+  @IsString()
+  SWAGGER_ENABLED?: string;
+
+  @IsString()
+  SWAGGER_PATH = 'docs';
 }
 
 export function validateEnvironment(config: Record<string, unknown>): EnvironmentVariables {
