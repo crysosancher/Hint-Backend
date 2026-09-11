@@ -112,6 +112,36 @@ curl -s -X POST http://localhost:3000/api/v1/auth/register \
   -d '{"email":"ada@example.com","password":"Sunshine123","confirmPassword":"Sunshine123"}'
 ```
 
+### Profile & Preferences endpoints
+
+These two endpoints are **auth-protected** — pass the access token as a Bearer token.
+
+| Endpoint                       | Purpose                                              |
+| ------------------------------ | ---------------------------------------------------- |
+| `GET /api/v1/profile`          | Read the current user's profile (404 until created)  |
+| `PATCH /api/v1/profile`        | Create/update the current user's profile (upsert)    |
+| `GET /api/v1/preferences`      | Read the current user's matching preferences         |
+| `PATCH /api/v1/preferences`    | Create/update preferences (partial upsert)           |
+
+Fixed vocabularies are exposed as enums (shared by DTOs, Mongo schemas and Swagger):
+
+| Field                  | Enum values                                                                 |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `gender`               | `woman`, `man`, `non_binary`                                                |
+| `preferredGenders[]`   | same as `gender`                                                            |
+| `profession`           | `technology_engineering`, `design_creative`, `product_management`, …        |
+| `relationshipIntent`   | `dating_romance`, `casual_coffee`, `friends`, `deep_connection`             |
+
+Profile `age` and the preference `ageMin`/`ageMax` range are validated to **13–100**, and `ageMin <= ageMax` is enforced server-side (across partial updates). `bio` is capped at 80 characters. Free-text company/education lives in the profile's optional `education` field.
+
+```bash
+TOKEN=...   # accessToken from /api/v1/auth/login
+
+curl -s -X PATCH http://localhost:3000/api/v1/profile \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Maya","age":24,"gender":"woman","profession":"design_creative","bio":"Coffee snob"}'
+```
+
 ---
 
 ## API documentation (Swagger)
@@ -197,7 +227,7 @@ test/                     # e2e tests
 | Phase | Scope                                                                 | Status  |
 | ----- | --------------------------------------------------------------------- | ------- |
 | 0     | Bootstrap: NestJS + config validation + MongoDB/Redis + health checks | ✅ done |
-| 1     | Auth + Users (signup / login / refresh) + Profiles + Preferences      | 🚧 auth + users done |
+| 1     | Auth + Users + Profiles + Preferences                                 | ✅ done |
 | 2     | Presence (Nearby Mode) + Location ingestion + Redis presence          | ⏳      |
 | 3     | Discovery (2dsphere 250 m) + Interest lifecycle + Matches             | ⏳      |
 | 4     | BullMQ queues: interest/presence expiry, location cleanup             | ⏳      |

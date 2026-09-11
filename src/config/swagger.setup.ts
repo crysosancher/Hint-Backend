@@ -37,6 +37,8 @@ export function buildSwaggerConfig(): Omit<OpenAPIObject, 'paths'> {
     )
     .addTag('Health', 'Liveness and readiness probes (served outside the /api/v1 prefix)')
     .addTag('Auth', 'Registration, login and refresh-token rotation')
+    .addTag('Profiles', "The authenticated user's profile (create/update/read)")
+    .addTag('Preferences', "The authenticated user's matching preferences")
     .build();
 }
 
