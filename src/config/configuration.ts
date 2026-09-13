@@ -35,6 +35,9 @@ export interface AppConfiguration {
     locationMaxAgeSeconds: number;
     locationMaxAccuracyMeters: number;
   };
+  interest: {
+    ttlDays: number;
+  };
   throttle: {
     ttlSeconds: number;
     limit: number;
@@ -85,6 +88,9 @@ export default (): AppConfiguration => ({
     radiusMeters: toInt(process.env.NEARBY_RADIUS_METERS, 250),
     locationMaxAgeSeconds: toInt(process.env.LOCATION_MAX_AGE_SECONDS, 120),
     locationMaxAccuracyMeters: toInt(process.env.LOCATION_MAX_ACCURACY_METERS, 100),
+  },
+  interest: {
+    ttlDays: toInt(process.env.INTEREST_TTL_DAYS, 7),
   },
   throttle: {
     ttlSeconds: toInt(process.env.THROTTLE_TTL_SECONDS, 60),

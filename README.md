@@ -142,6 +142,82 @@ curl -s -X PATCH http://localhost:3000/api/v1/profile \
   -d '{"name":"Maya","age":24,"gender":"woman","profession":"design_creative","bio":"Coffee snob"}'
 ```
 
+### Nearby Mode & Location endpoints
+
+Both are **auth-protected**. Nearby Mode is an explicit, self-expiring *presence*
+session kept in **Redis** (`hint:presence:<userId>`, TTL =
+`NEARBY_SESSION_TTL_MINUTES`), so expiry needs no cron job. The durable latest
+location lives in **MongoDB** as a GeoJSON `Point` (`[longitude, latitude]`) with a
+**2dsphere** index — used by the server-authoritative 250 m discovery query.
+
+| Endpoint                         | Purpose                                                 |
+| -------------------------------- | ------------------------------------------------------- |
+| `POST /api/v1/nearby/activate`   | Start (or renew) Nearby Mode; returns the session + TTL |
+| `POST /api/v1/nearby/deactivate` | Stop Nearby Mode (removes the user from discovery)      |
+| `GET /api/v1/nearby/status`      | Current Nearby Mode state + remaining TTL               |
+| `POST /api/v1/location`          | Ingest the latest GPS fix (requires active Nearby Mode) |
+| `GET /api/v1/location`           | Read the caller's own latest location (404 until set)   |
+
+A fix is rejected with **409** unless Nearby Mode is active and with **400** when the
+reported `accuracyMeters` exceeds `LOCATION_MAX_ACCURACY_METERS`. Rapid fixes are
+coalesced per user before they are written, and exact coordinates are only ever
+returned to their owner.
+
+```bash
+TOKEN=...   # accessToken from /api/v1/auth/login
+
+curl -s -X POST http://localhost:3000/api/v1/nearby/activate \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -s -X POST http://localhost:3000/api/v1/location \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"latitude":12.971599,"longitude":77.594566,"accuracyMeters":12.5}'
+```
+
+### Discovery, Interests & Matches endpoints
+
+All **auth-protected**. Discovery is **server-authoritative**: the caller sends
+nothing but their token, MongoDB's **2dsphere** index performs the distance
+computation, and only a *coarse* distance (bucketed to 50 m) plus a safe profile
+is ever returned — exact coordinates never leave the server.
+
+| Endpoint                                    | Purpose                                                      |
+| ------------------------------------------- | ------------------------------------------------------------ |
+| `GET /api/v1/discovery/nearby`              | Eligible users within 250 m (nearest first)                   |
+| `GET /api/v1/users/:userId`                 | View one discoverable user's profile (404 when not in range)  |
+| `POST /api/v1/interests/:userId`            | Send an interest (both users must be mutually discoverable)   |
+| `GET /api/v1/interests/incoming`            | Received interests that are still actionable                  |
+| `GET /api/v1/interests/outgoing`            | Sent interests that are still pending                         |
+| `POST /api/v1/interests/:interestId/accept` | Accept an interest → creates the persistent match             |
+| `POST /api/v1/interests/:interestId/ignore` | Ignore an interest (no match)                                 |
+| `GET /api/v1/matches`                       | The caller's active matches, with the other participant       |
+
+A user appears in discovery only when **all** of these hold: they are in Nearby
+Mode, their latest fix is fresher than `LOCATION_MAX_AGE_SECONDS`, that fix is
+within `NEARBY_RADIUS_METERS`, and they have a profile. Sending an interest
+re-checks the exact same eligibility server-side, so the 250 m rule cannot be
+bypassed by calling the endpoint directly. `GET /users/:userId` reuses it too —
+an out-of-range id simply answers **404**, so the route cannot be used to probe
+for accounts.
+
+Interest lifecycle: `sent → accepted | ignored | expired`. A pending interest
+stops being actionable after `INTEREST_TTL_DAYS`, and accepting one creates a
+**persistent match** that survives both users leaving the 250 m radius.
+Self-interests are rejected with **400**; a duplicate pending interest (in
+either direction) is rejected with **409**. Duplicate matches are impossible by
+construction: the participants are stored in a canonical order behind a unique
+index.
+
+```bash
+TOKEN=...   # accessToken from /api/v1/auth/login
+
+curl -s http://localhost:3000/api/v1/discovery/nearby \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -s -X POST http://localhost:3000/api/v1/interests/<userId> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ---
 
 ## API documentation (Swagger)
@@ -214,7 +290,16 @@ src/
     redis/                # Shared ioredis client + RedisService
   modules/
     health/               # Liveness / readiness + response DTOs
-  common/                 # Guards, interceptors, filters, pipes (grows per phase)
+    auth/                 # Register / login / refresh (JWT + Redis rotation)
+    users/                # Account data + credentials
+    profiles/             # Profile CRUD + safe (third-party) profile projection
+    preferences/          # Matching preferences
+    presence/             # Nearby Mode (Redis presence + expiry)
+    location/             # Latest GPS fix + 2dsphere search
+    discovery/            # Eligible users within 250 m (+ GET /users/:userId)
+    interests/            # Interest lifecycle (send / accept / ignore / expire)
+    matches/              # Persistent mutual matches
+  common/                 # Guards, decorators, enums, geo helpers, debouncer
 docs/
   node-concepts/          # Advanced Node.js concept map
 test/                     # e2e tests
@@ -228,8 +313,8 @@ test/                     # e2e tests
 | ----- | --------------------------------------------------------------------- | ------- |
 | 0     | Bootstrap: NestJS + config validation + MongoDB/Redis + health checks | ✅ done |
 | 1     | Auth + Users + Profiles + Preferences                                 | ✅ done |
-| 2     | Presence (Nearby Mode) + Location ingestion + Redis presence          | ⏳      |
-| 3     | Discovery (2dsphere 250 m) + Interest lifecycle + Matches             | ⏳      |
+| 2     | Presence (Nearby Mode) + Location ingestion + Redis presence          | ✅ done |
+| 3     | Discovery (2dsphere 250 m) + Interest lifecycle + Matches             | ✅ done |
 | 4     | BullMQ queues: interest/presence expiry, location cleanup             | ⏳      |
 | 5     | WebSockets gateway + chat + notifications                             | ⏳      |
 | 6     | Moderation (block/report) + rate limiting                             | ⏳      |

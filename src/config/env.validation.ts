@@ -84,6 +84,11 @@ export class EnvironmentVariables {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  INTEREST_TTL_DAYS = 7;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   THROTTLE_TTL_SECONDS = 60;
 
   @Type(() => Number)

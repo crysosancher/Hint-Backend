@@ -14,7 +14,7 @@ observe* it.
 
 | # | Concept | Where it lives | Status |
 | - | ------- | -------------- | ------ |
-| 01 | Event loop — macro vs micro tasks | `src/main.ts`, presence debounce, response interceptor | ⏳ Phase 2 |
+| 01 | Event loop — macro vs micro tasks | `src/common/debounce/keyed-debouncer.ts` | ✅ Phase 2 |
 | 02 | Worker threads (`worker_threads`, `piscina`) | `src/workers/*` — image pipeline + compatibility scoring | ⏳ Phase 3/6 |
 | 03 | Queues (BullMQ) | `src/queues/*` — expiry, cleanup, notifications | ⏳ Phase 4 |
 | 04 | Streams (`Readable`/`Transform`, backpressure) | `src/streams/*` — uploads + data export | ⏳ Phase 7 |

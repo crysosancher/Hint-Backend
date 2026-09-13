@@ -39,6 +39,11 @@ export function buildSwaggerConfig(): Omit<OpenAPIObject, 'paths'> {
     .addTag('Auth', 'Registration, login and refresh-token rotation')
     .addTag('Profiles', "The authenticated user's profile (create/update/read)")
     .addTag('Preferences', "The authenticated user's matching preferences")
+    .addTag('Presence', 'Nearby Mode session (activate / deactivate / status)')
+    .addTag('Location', "The authenticated user's latest ingested location")
+    .addTag('Discovery', 'Eligible users within the 250 m radius (server-authoritative)')
+    .addTag('Interests', 'Send, list, accept, ignore and expire interests')
+    .addTag('Matches', 'Persistent mutual matches created by accepting an interest')
     .build();
 }
 
