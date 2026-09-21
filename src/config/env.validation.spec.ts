@@ -17,6 +17,8 @@ describe('validateEnvironment', () => {
     expect(env.NEARBY_RADIUS_METERS).toBe(250);
     expect(env.NEARBY_SESSION_TTL_MINUTES).toBe(30);
     expect(env.QUEUE_PREFIX).toBe('hint');
+    expect(env.INTEREST_EXPIRY_SWEEP_INTERVAL_MS).toBe(3_600_000);
+    expect(env.LOCATION_CLEANUP_SWEEP_INTERVAL_MS).toBe(60_000);
   });
 
   it('coerces numeric environment strings to numbers', () => {

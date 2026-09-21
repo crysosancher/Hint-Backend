@@ -104,6 +104,18 @@ export class EnvironmentVariables {
   @Min(1)
   QUEUE_CONCURRENCY = 5;
 
+  /** How often the worker sweeps overdue interests (default: hourly). */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1_000)
+  INTEREST_EXPIRY_SWEEP_INTERVAL_MS = 3_600_000;
+
+  /** How often the worker deletes stale locations (default: every minute). */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1_000)
+  LOCATION_CLEANUP_SWEEP_INTERVAL_MS = 60_000;
+
   /** 'true'/'false' (leniently parsed in configuration.ts). */
   @IsOptional()
   @IsString()

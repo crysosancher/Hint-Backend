@@ -146,8 +146,10 @@ curl -s -X PATCH http://localhost:3000/api/v1/profile \
 
 Both are **auth-protected**. Nearby Mode is an explicit, self-expiring *presence*
 session kept in **Redis** (`hint:presence:<userId>`, TTL =
-`NEARBY_SESSION_TTL_MINUTES`), so expiry needs no cron job. The durable latest
-location lives in **MongoDB** as a GeoJSON `Point` (`[longitude, latitude]`) with a
+`NEARBY_SESSION_TTL_MINUTES`), so the key disappears on its own. Every activation
+also arms a delayed **presence-expiry** job (see *Background queues*) that drops
+the now-orphaned location once the session lapses. The durable latest location
+lives in **MongoDB** as a GeoJSON `Point` (`[longitude, latitude]`) with a
 **2dsphere** index — used by the server-authoritative 250 m discovery query.
 
 | Endpoint                         | Purpose                                                 |
@@ -217,6 +219,38 @@ curl -s http://localhost:3000/api/v1/discovery/nearby \
 curl -s -X POST http://localhost:3000/api/v1/interests/<userId> \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+### Background queues (BullMQ)
+
+Phase 4 moves time-based work off the request path and into a **separate worker
+process**. The API (`main.ts`) only *produces* jobs; the worker (`worker.ts`)
+*consumes* them, so sweeps never compete with HTTP traffic for the event loop.
+
+| Queue              | Job      | Trigger                                              | What it does                                                                 |
+| ------------------ | -------- | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `interest-expiry`  | `sweep`  | repeatable (default hourly)                          | Marks overdue pending interests `expired` (`InterestsService.expireOverdue`) |
+| `presence-expiry`  | `expire` | delayed per session (`NEARBY_SESSION_TTL_MINUTES`)   | Drops the location left behind by a lapsed Nearby Mode session               |
+| `location-cleanup` | `sweep`  | repeatable (default every minute)                    | Deletes locations older than `LOCATION_MAX_AGE_SECONDS`                      |
+
+```bash
+# Run Mongo + Redis, then the worker (in addition to the API)
+docker compose up -d
+npm run start:worker
+```
+
+The repeatable sweeps are BullMQ **Job Schedulers** (`upsertJobScheduler`), so
+they are re-asserted idempotently on every worker boot and survive restarts
+because the schedule lives in Redis. Interest expiry is *also* applied lazily on
+read/respond — the sweep just makes the terminal state durable, and the
+location sweeps are the safety net for sessions that ended without a job (explicit
+deactivation, a crashed worker or a lost job).
+
+| Variable                             | Default   | Meaning                                     |
+| ------------------------------------ | --------- | ------------------------------------------- |
+| `QUEUE_PREFIX`                       | `hint`    | Redis key namespace shared by every queue    |
+| `QUEUE_CONCURRENCY`                  | `5`       | Jobs a single worker processes at once       |
+| `INTEREST_EXPIRY_SWEEP_INTERVAL_MS`  | `3600000` | Interest-expiry sweep cadence                |
+| `LOCATION_CLEANUP_SWEEP_INTERVAL_MS` | `60000`   | Location-cleanup sweep cadence               |
 
 ---
 
@@ -288,6 +322,7 @@ src/
   infra/
     database/             # Mongoose connection
     redis/                # Shared ioredis client + RedisService
+  queues/                 # BullMQ producers, workers + Job Schedulers
   modules/
     health/               # Liveness / readiness + response DTOs
     auth/                 # Register / login / refresh (JWT + Redis rotation)
@@ -315,7 +350,7 @@ test/                     # e2e tests
 | 1     | Auth + Users + Profiles + Preferences                                 | ✅ done |
 | 2     | Presence (Nearby Mode) + Location ingestion + Redis presence          | ✅ done |
 | 3     | Discovery (2dsphere 250 m) + Interest lifecycle + Matches             | ✅ done |
-| 4     | BullMQ queues: interest/presence expiry, location cleanup             | ⏳      |
+| 4     | BullMQ queues: interest/presence expiry, location cleanup             | ✅ done |
 | 5     | WebSockets gateway + chat + notifications                             | ⏳      |
 | 6     | Moderation (block/report) + rate limiting                             | ⏳      |
 | 7     | Streams (uploads/exports) + instrumentation (AsyncLocalStorage)       | ⏳      |

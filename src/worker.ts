@@ -5,9 +5,10 @@ import { WorkerModule } from './worker.module';
 /**
  * Background worker entry point.
  *
- * Starts a NestJS *application context* (no HTTP server). Later phases attach
- * BullMQ processors and worker_threads pools here so heavy work never blocks
- * the API event loop.
+ * Starts a NestJS *application context* (no HTTP server) with the BullMQ
+ * consumers and Job Schedulers registered by `QueueProcessorsModule`. Running
+ * separately from the API keeps queue work off the request path and lets the
+ * two processes scale independently.
  */
 async function bootstrap(): Promise<void> {
   const logger = new Logger('WorkerBootstrap');
@@ -17,7 +18,7 @@ async function bootstrap(): Promise<void> {
 
   app.enableShutdownHooks();
 
-  logger.log('Worker process started (no queue processors registered yet)');
+  logger.log('Worker process started (queue consumers + schedulers registered)');
 }
 
 void bootstrap();

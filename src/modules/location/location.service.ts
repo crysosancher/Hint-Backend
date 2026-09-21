@@ -86,6 +86,35 @@ export class LocationService implements OnModuleDestroy {
   }
 
   /**
+   * Removes a user's stored location.
+   *
+   * Used once a Nearby Mode session ends: a location is only meaningful while
+   * its owner is discoverable. Any coalesced fix still sitting in the debouncer
+   * is flushed first, otherwise that write would re-create the document.
+   */
+  async delete(userId: string): Promise<void> {
+    await this.debouncer.flushKey(userId);
+    await this.locationModel.deleteOne({ userId }).exec();
+  }
+
+  /**
+   * Deletes every fix older than `olderThanMs` — the Phase 4 cleanup sweep.
+   *
+   * A fix that has aged past the discovery freshness window can never make its
+   * owner a candidate again, and the MVP keeps no movement history, so it is
+   * safe to drop. A fix accepted after this query and still in the debouncer is
+   * simply written back by its upsert on the next flush.
+   *
+   * @returns the number of deleted documents.
+   */
+  async deleteStale(olderThanMs: number): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const result = await this.locationModel.deleteMany({ updatedAt: { $lte: cutoff } }).exec();
+
+    return result.deletedCount;
+  }
+
+  /**
    * Other users whose latest fix is within `radiusMeters` of `point`, using the
    * `2dsphere` index.
    *

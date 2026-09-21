@@ -44,6 +44,29 @@ class FakeLocationModel {
     this.docs.set(filter.userId, doc);
     return { exec: async (): Promise<StoredLocation> => ({ ...doc }) };
   }
+
+  deleteOne(filter: { userId: string }) {
+    return {
+      exec: async (): Promise<{ deletedCount: number }> => ({
+        deletedCount: this.docs.delete(filter.userId) ? 1 : 0,
+      }),
+    };
+  }
+
+  deleteMany(filter: { updatedAt?: { $lte?: Date } }) {
+    return {
+      exec: async (): Promise<{ deletedCount: number }> => {
+        const cutoff = filter.updatedAt?.$lte;
+        let deletedCount = 0;
+        for (const [userId, doc] of this.docs) {
+          if (cutoff && doc.updatedAt.getTime() > cutoff.getTime()) continue;
+          this.docs.delete(userId);
+          deletedCount += 1;
+        }
+        return { deletedCount };
+      },
+    };
+  }
 }
 
 /** Minimal in-memory stand-in for PresenceService. */
@@ -147,5 +170,36 @@ describe('LocationService', () => {
 
     await expect(service.onModuleDestroy()).resolves.toBeUndefined();
     expect(model.updateCount).toBe(1);
+  });
+
+  describe('delete', () => {
+    it('removes the stored fix', async () => {
+      await service.update(userId, fix);
+      await expect(service.get(userId)).resolves.not.toBeNull();
+
+      await service.delete(userId);
+
+      await expect(service.get(userId)).resolves.toBeNull();
+      expect(model.docs.has(userId)).toBe(false);
+    });
+
+    it('is a no-op when nothing is stored', async () => {
+      await expect(service.delete(userId)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('deleteStale', () => {
+    it('deletes only the fixes older than the cutoff', async () => {
+      const staleUserId = new Types.ObjectId().toString();
+      await service.update(userId, fix);
+      await service.update(staleUserId, fix);
+
+      const stale = model.docs.get(staleUserId);
+      if (stale) stale.updatedAt = new Date(Date.now() - 5 * 60 * 1000);
+
+      await expect(service.deleteStale(120 * 1000)).resolves.toBe(1);
+      expect(model.docs.has(staleUserId)).toBe(false);
+      expect(model.docs.has(userId)).toBe(true);
+    });
   });
 });

@@ -16,7 +16,7 @@ observe* it.
 | - | ------- | -------------- | ------ |
 | 01 | Event loop — macro vs micro tasks | `src/common/debounce/keyed-debouncer.ts` | ✅ Phase 2 |
 | 02 | Worker threads (`worker_threads`, `piscina`) | `src/workers/*` — image pipeline + compatibility scoring | ⏳ Phase 3/6 |
-| 03 | Queues (BullMQ) | `src/queues/*` — expiry, cleanup, notifications | ⏳ Phase 4 |
+| 03 | Queues (BullMQ) | `src/queues/*` — expiry, cleanup | ✅ Phase 4 |
 | 04 | Streams (`Readable`/`Transform`, backpressure) | `src/streams/*` — uploads + data export | ⏳ Phase 7 |
 | 05 | Cluster / child processes | `src/main.ts` cluster wrapper, `src/worker.ts` | ⏳ Phase 8 |
 | 06 | Buffers & TypedArrays | image hashing, `SharedArrayBuffer` in workers | ⏳ Phase 3 |

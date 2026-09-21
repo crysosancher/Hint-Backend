@@ -80,6 +80,22 @@ class FakeInterestModel {
     };
   }
 
+  updateMany(
+    filter: Record<string, unknown>,
+    update: { $set: { status: InterestStatus } },
+  ): { exec: () => Promise<{ modifiedCount: number }> } {
+    return {
+      exec: async (): Promise<{ modifiedCount: number }> => {
+        let modifiedCount = 0;
+        for (const doc of this.matching(filter)) {
+          doc.status = update.$set.status;
+          modifiedCount += 1;
+        }
+        return { modifiedCount };
+      },
+    };
+  }
+
   private first(filter: Record<string, unknown>): InterestDocument | null {
     const [doc] = this.matching(filter);
     return doc ? this.hydrate(doc) : null;
@@ -92,8 +108,9 @@ class FakeInterestModel {
   private matches(doc: StoredInterest, filter: Record<string, unknown>): boolean {
     if (filter.status !== undefined && doc.status !== filter.status) return false;
 
-    const expiresAt = filter.expiresAt as { $gt?: Date } | undefined;
+    const expiresAt = filter.expiresAt as { $gt?: Date; $lte?: Date } | undefined;
     if (expiresAt?.$gt && doc.expiresAt.getTime() <= expiresAt.$gt.getTime()) return false;
+    if (expiresAt?.$lte && doc.expiresAt.getTime() > expiresAt.$lte.getTime()) return false;
 
     if (filter.senderId !== undefined && asId(doc.senderId) !== asId(filter.senderId)) return false;
     if (filter.receiverId !== undefined && asId(doc.receiverId) !== asId(filter.receiverId)) {
@@ -350,9 +367,7 @@ describe('InterestsService', () => {
     it('only lets the receiver respond', async () => {
       const interest = await service.send(senderId, receiverId);
 
-      await expect(service.accept(senderId, interest.id)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(service.accept(senderId, interest.id)).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('rejects a malformed interest id', async () => {
@@ -426,6 +441,44 @@ describe('InterestsService', () => {
       if (doc) doc.expiresAt = new Date(Date.now() - 1000);
 
       await expect(service.listIncoming(receiverId)).resolves.toEqual([]);
+    });
+  });
+
+  describe('expireOverdue', () => {
+    it('marks an overdue pending interest as expired', async () => {
+      const interest = await service.send(senderId, receiverId);
+      const doc = model.docs.get(interest.id);
+      if (doc) doc.expiresAt = new Date(Date.now() - 1_000);
+
+      await expect(service.expireOverdue()).resolves.toBe(1);
+      expect(model.docs.get(interest.id)?.status).toBe(InterestStatus.Expired);
+    });
+
+    it('does not record a response when auto-expiring', async () => {
+      const interest = await service.send(senderId, receiverId);
+      const doc = model.docs.get(interest.id);
+      if (doc) doc.expiresAt = new Date(Date.now() - 1_000);
+
+      await service.expireOverdue();
+
+      expect(model.docs.get(interest.id)?.respondedAt).toBeUndefined();
+    });
+
+    it('leaves interests that are still actionable alone', async () => {
+      const interest = await service.send(senderId, receiverId);
+
+      await expect(service.expireOverdue()).resolves.toBe(0);
+      expect(model.docs.get(interest.id)?.status).toBe(InterestStatus.Sent);
+    });
+
+    it('never rewrites an interest that was already answered', async () => {
+      const interest = await service.send(senderId, receiverId);
+      await service.accept(receiverId, interest.id);
+      const doc = model.docs.get(interest.id);
+      if (doc) doc.expiresAt = new Date(Date.now() - 1_000);
+
+      await expect(service.expireOverdue()).resolves.toBe(0);
+      expect(model.docs.get(interest.id)?.status).toBe(InterestStatus.Accepted);
     });
   });
 });

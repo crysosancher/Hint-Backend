@@ -1,15 +1,23 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { Queue } from 'bullmq';
 import type { AppConfiguration } from '../../config/configuration';
 import { RedisService } from '../../infra/redis/redis.service';
+import {
+  PRESENCE_EXPIRY_QUEUE,
+  type PresenceExpiryJobData,
+  QUEUE_JOBS,
+  presenceExpiryJobId,
+} from '../../queues/queue.constants';
 import { NearbySessionResponseDto, NearbyStatus } from './dto/nearby-session-response.dto';
 
 /**
  * Shape stored in Redis at `hint:presence:<userId>`.
  *
  * The key's TTL is the source of truth for expiry — Redis drops it
- * automatically, so an expired session simply stops existing and no cron job
- * is required.
+ * automatically, so an expired session simply stops existing. A delayed
+ * presence-expiry job is armed alongside it purely to run cleanup side effects
+ * once it lapses (see {@link PresenceService}).
  */
 export interface NearbySession {
   userId: string;
@@ -25,12 +33,19 @@ export interface NearbySession {
  * this user currently discoverable?" and expires on its own after
  * `nearby.sessionTtlMinutes`. The durable location itself is owned by the
  * Location module.
+ *
+ * Every activation also arms a delayed *presence-expiry* job so the worker
+ * process can react the moment the session lapses (today: drop the now-orphaned
+ * location; in Phase 5: push `nearby.user.disappeared`). The Redis TTL remains
+ * the source of truth — the job only triggers side effects.
  */
 @Injectable()
 export class PresenceService {
   constructor(
     private readonly config: ConfigService<AppConfiguration, true>,
     private readonly redis: RedisService,
+    @Inject(PRESENCE_EXPIRY_QUEUE)
+    private readonly presenceExpiry: Queue<PresenceExpiryJobData>,
   ) {}
 
   /**
@@ -48,6 +63,7 @@ export class PresenceService {
     };
 
     await this.redis.setJson(this.presenceKey(userId), session, ttlSeconds);
+    await this.scheduleExpiry(userId, ttlSeconds);
 
     return {
       userId,
@@ -61,6 +77,7 @@ export class PresenceService {
   /** Stops Nearby Mode, removing the user from active discovery. */
   async deactivate(userId: string): Promise<NearbySessionResponseDto> {
     await this.redis.del(this.presenceKey(userId));
+    await this.removeExpiry(presenceExpiryJobId(userId));
     return { userId, status: NearbyStatus.Inactive };
   }
 
@@ -104,8 +121,44 @@ export class PresenceService {
   async filterActive(userIds: string[]): Promise<string[]> {
     if (userIds.length === 0) return [];
 
-    const values = await this.redis.client.mget(...userIds.map((userId) => this.presenceKey(userId)));
+    const values = await this.redis.client.mget(
+      ...userIds.map((userId) => this.presenceKey(userId)),
+    );
     return userIds.filter((_userId, index) => values[index] !== null);
+  }
+
+  /**
+   * Arms the delayed job that fires once this session's TTL has elapsed.
+   *
+   * Any previously armed job is removed first: re-activating must *extend* the
+   * deadline, and a stable `jobId` alone would make BullMQ treat the second
+   * insert as a duplicate and leave the original (earlier) delay in place.
+   */
+  private async scheduleExpiry(userId: string, ttlSeconds: number): Promise<void> {
+    const jobId = presenceExpiryJobId(userId);
+    await this.removeExpiry(jobId);
+
+    await this.presenceExpiry.add(
+      QUEUE_JOBS.presenceExpiry,
+      { userId },
+      {
+        jobId,
+        delay: ttlSeconds * 1000,
+        // Completed jobs must not linger: their stable id would otherwise block
+        // the next activation from arming a fresh expiry for the same user.
+        removeOnComplete: true,
+      },
+    );
+  }
+
+  /** Best-effort cancel of a pending expiry (the job may already be gone/locked). */
+  private async removeExpiry(jobId: string): Promise<void> {
+    try {
+      await this.presenceExpiry.remove(jobId);
+    } catch {
+      // An already-active job cannot be removed; the processor re-checks the
+      // session before acting, so leaving it in place is safe.
+    }
   }
 
   private sessionTtlSeconds(): number {

@@ -83,6 +83,28 @@ export class InterestsService {
   }
 
   /**
+   * Marks every overdue pending interest as `expired` — the Phase 4 sweep.
+   *
+   * Expiry is also applied lazily when an interest is read or answered, so this
+   * only makes the state durable: it is idempotent, hits the `expiresAt` index,
+   * and releases the unique partial index that treats `sent` as pending.
+   * `respondedAt` is deliberately left untouched — it records a receiver's
+   * accept/ignore, which never happened here.
+   *
+   * @returns the number of interests actually updated.
+   */
+  async expireOverdue(): Promise<number> {
+    const result = await this.interestModel
+      .updateMany(
+        { status: InterestStatus.Sent, expiresAt: { $lte: new Date() } },
+        { $set: { status: InterestStatus.Expired } },
+      )
+      .exec();
+
+    return result.modifiedCount;
+  }
+
+  /**
    * Accepts a received interest and creates the persistent match.
    *
    * The match is written *before* the interest is marked accepted: should the
@@ -152,10 +174,7 @@ export class InterestsService {
    * A missing interest and one addressed to somebody else are reported
    * identically, so the endpoint cannot be used to probe for interest ids.
    */
-  private async findRespondable(
-    receiverId: string,
-    interestId: string,
-  ): Promise<InterestDocument> {
+  private async findRespondable(receiverId: string, interestId: string): Promise<InterestDocument> {
     if (!Types.ObjectId.isValid(interestId)) {
       throw new NotFoundException('Interest not found');
     }

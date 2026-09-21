@@ -1,6 +1,12 @@
 import { ConfigService } from '@nestjs/config';
+import type { Queue } from 'bullmq';
 import type { AppConfiguration } from '../../config/configuration';
 import { RedisService } from '../../infra/redis/redis.service';
+import {
+  type PresenceExpiryJobData,
+  QUEUE_JOBS,
+  presenceExpiryJobId,
+} from '../../queues/queue.constants';
 import { NearbyStatus } from './dto/nearby-session-response.dto';
 import { PresenceService } from './presence.service';
 
@@ -43,6 +49,28 @@ class FakeRedis {
   }
 }
 
+interface AddedJob {
+  name: string;
+  data: unknown;
+  opts?: { jobId?: string; delay?: number; removeOnComplete?: boolean };
+}
+
+/** In-memory stand-in for the BullMQ presence-expiry producer. */
+class FakeQueue {
+  readonly added: AddedJob[] = [];
+  readonly removed: string[] = [];
+
+  async add(name: string, data: unknown, opts?: AddedJob['opts']): Promise<{ id?: string }> {
+    this.added.push({ name, data, opts });
+    return { id: opts?.jobId };
+  }
+
+  async remove(jobId: string): Promise<number> {
+    this.removed.push(jobId);
+    return 1;
+  }
+}
+
 const CONFIG: Record<string, number> = {
   'nearby.sessionTtlMinutes': 30,
   'nearby.locationMaxAccuracyMeters': 100,
@@ -55,13 +83,16 @@ const configFake = {
 describe('PresenceService', () => {
   const userId = '665f1b2c3d4e5f6a7b8c9d0e';
   let redis: FakeRedis;
+  let queue: FakeQueue;
   let service: PresenceService;
 
   beforeEach(() => {
     redis = new FakeRedis();
+    queue = new FakeQueue();
     service = new PresenceService(
       configFake as unknown as ConfigService<AppConfiguration, true>,
       redis as unknown as RedisService,
+      queue as unknown as Queue<PresenceExpiryJobData>,
     );
   });
 
@@ -129,5 +160,50 @@ describe('PresenceService', () => {
 
     expect(status.status).toBe(NearbyStatus.Inactive);
     expect(redis.store.has(key)).toBe(false);
+  });
+
+  describe('presence-expiry job', () => {
+    it('arms a delayed job when a session is activated', async () => {
+      await service.activate(userId);
+
+      expect(queue.added).toHaveLength(1);
+      expect(queue.added[0]).toMatchObject({
+        name: QUEUE_JOBS.presenceExpiry,
+        data: { userId },
+        opts: {
+          jobId: presenceExpiryJobId(userId),
+          delay: 30 * 60 * 1000,
+          removeOnComplete: true,
+        },
+      });
+    });
+
+    it('replaces the pending expiry when a session is renewed', async () => {
+      await service.activate(userId);
+      await service.activate(userId);
+
+      expect(queue.removed).toContain(presenceExpiryJobId(userId));
+      expect(queue.added).toHaveLength(2);
+    });
+
+    it('cancels the pending expiry when the session is deactivated', async () => {
+      await service.activate(userId);
+      queue.removed.length = 0;
+
+      await service.deactivate(userId);
+
+      expect(queue.removed).toEqual([presenceExpiryJobId(userId)]);
+    });
+
+    it('still activates when a pending job cannot be removed (locked)', async () => {
+      queue.remove = async () => {
+        throw new Error('Job is locked');
+      };
+
+      await expect(service.activate(userId)).resolves.toMatchObject({
+        status: NearbyStatus.Active,
+      });
+      expect(queue.added).toHaveLength(1);
+    });
   });
 });

@@ -49,6 +49,8 @@ export interface AppConfiguration {
   queue: {
     prefix: string;
     concurrency: number;
+    interestExpiryIntervalMs: number;
+    locationCleanupIntervalMs: number;
   };
 }
 
@@ -104,5 +106,7 @@ export default (): AppConfiguration => ({
   queue: {
     prefix: process.env.QUEUE_PREFIX ?? 'hint',
     concurrency: toInt(process.env.QUEUE_CONCURRENCY, 5),
+    interestExpiryIntervalMs: toInt(process.env.INTEREST_EXPIRY_SWEEP_INTERVAL_MS, 3_600_000),
+    locationCleanupIntervalMs: toInt(process.env.LOCATION_CLEANUP_SWEEP_INTERVAL_MS, 60_000),
   },
 });

@@ -9,6 +9,7 @@ import { RedisService } from '../src/infra/redis/redis.service';
 import { NearbyStatus } from '../src/modules/presence/dto/nearby-session-response.dto';
 import { PresenceController } from '../src/modules/presence/presence.controller';
 import { PresenceService } from '../src/modules/presence/presence.service';
+import { PRESENCE_EXPIRY_QUEUE } from '../src/queues/queue.constants';
 
 const ACCESS_SECRET = 'test-access-secret';
 const SESSION_TTL_MINUTES = 30;
@@ -61,6 +62,17 @@ const configFake = {
   get: (key: string): string | number | undefined => CONFIG[key],
 };
 
+/** Minimal stand-in for the BullMQ producer; the worker is exercised separately. */
+class FakeQueue {
+  async add(): Promise<{ id?: string }> {
+    return {};
+  }
+
+  async remove(): Promise<number> {
+    return 0;
+  }
+}
+
 /**
  * End-to-end test for the Nearby Mode endpoints. Redis and config are replaced
  * with in-memory fakes so the suite exercises the real HTTP layer, routing,
@@ -82,6 +94,7 @@ describe('Presence (e2e)', () => {
       providers: [
         PresenceService,
         { provide: RedisService, useValue: new FakeRedis() },
+        { provide: PRESENCE_EXPIRY_QUEUE, useValue: new FakeQueue() },
         { provide: ConfigService, useValue: configFake },
         JwtService,
       ],

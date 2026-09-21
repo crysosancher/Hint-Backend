@@ -10,6 +10,11 @@ import { LocationService } from '../src/modules/location/location.service';
 import { MatchService } from '../src/modules/matches/matches.service';
 import { PresenceService } from '../src/modules/presence/presence.service';
 import { ProfilesService } from '../src/modules/profiles/profiles.service';
+import {
+  INTEREST_EXPIRY_QUEUE,
+  LOCATION_CLEANUP_QUEUE,
+  PRESENCE_EXPIRY_QUEUE,
+} from '../src/queues/queue.constants';
 
 /**
  * Boots the **real** `AppModule` — the same graph `main.ts` starts — with the
@@ -37,12 +42,27 @@ describe('App module (e2e)', () => {
     on: (): unknown => redisFake,
   };
 
+  // Replaces the BullMQ producers (and their Redis connections) for the API
+  // graph; the queue consumers only ever run in the worker process.
+  const queueFake = {
+    add: async (): Promise<{ id?: string }> => ({}),
+    remove: async (): Promise<number> => 0,
+    upsertJobScheduler: async (): Promise<unknown> => ({}),
+    close: async (): Promise<void> => undefined,
+  };
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(getConnectionToken())
       .useValue(connectionFake)
       .overrideProvider(REDIS_CLIENT)
       .useValue(redisFake)
+      .overrideProvider(INTEREST_EXPIRY_QUEUE)
+      .useValue(queueFake)
+      .overrideProvider(PRESENCE_EXPIRY_QUEUE)
+      .useValue(queueFake)
+      .overrideProvider(LOCATION_CLEANUP_QUEUE)
+      .useValue(queueFake)
       .compile();
 
     app = moduleRef.createNestApplication();
