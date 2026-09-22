@@ -48,7 +48,12 @@ export interface PresenceExpiryJobData {
  *
  * A user has at most one pending expiry, and a stable id is what lets
  * re-activation replace (rather than duplicate) it.
+ *
+ * The separator is deliberately `-`, never `:`. BullMQ validates custom ids in
+ * `Job.validateOptions` and throws `Custom Id cannot contain :` (it uses the
+ * colon to compose the job's Redis key), which would make every activation —
+ * and therefore `POST /api/v1/nearby/activate` — fail with a 500.
  */
 export function presenceExpiryJobId(userId: string): string {
-  return `presence-expiry:${userId}`;
+  return `presence-expiry-${userId}`;
 }

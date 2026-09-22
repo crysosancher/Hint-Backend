@@ -178,6 +178,15 @@ describe('PresenceService', () => {
       });
     });
 
+    it('uses a job id BullMQ accepts (custom ids may not contain ":")', () => {
+      // BullMQ's `Job.validateOptions` throws `Custom Id cannot contain :`
+      // unless the id has exactly two colons (a legacy repeatable-job shape).
+      // Presence is the only producer that sets an explicit `jobId`, and the
+      // throw escapes as a 500 on POST /api/v1/nearby/activate — this is the
+      // guard against reintroducing a colon separator.
+      expect(presenceExpiryJobId(userId)).not.toContain(':');
+    });
+
     it('replaces the pending expiry when a session is renewed', async () => {
       await service.activate(userId);
       await service.activate(userId);

@@ -15,7 +15,11 @@ now". BullMQ keeps the queue in Redis, which buys three distinct primitives:
   survives restarts and is re-asserted idempotently on every boot.
 - **Job ids** — `{ jobId }` makes adds idempotent per id. A second `add` with an
   existing id is a no-op, which is why replacement (below) needs an explicit
-  `remove()` first.
+  `remove()` first. Custom ids are **validated**: BullMQ throws
+  `Custom Id cannot contain :` (and rejects purely numeric ids), because it
+  builds the job's Redis key from the id. Keep the separator free of colons —
+  `presenceExpiryJobId()` uses `presence-expiry-<userId>` for exactly this
+  reason.
 
 BullMQ needs its **own** Redis connections: blocking consumers (`Worker`) call
 `BRPOPLPUSH`-style commands that must not be aborted by a request timeout, so the
